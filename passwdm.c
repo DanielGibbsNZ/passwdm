@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -59,8 +60,18 @@ void perform_command(char *command) {
 		}
 		// Change to the database and update the prompt.
 		else {
-			database = strdup(dbname);
-			asprintf(&prompt, "%s> ", database);
+			// Get passphrase for this database.
+			char *pass_prompt;
+			asprintf(&pass_prompt, "Passphrase for %s: ", dbname);
+			char *passphrase = getpass(pass_prompt);
+			// Validate passphrase.
+			if(passphrase) {
+				database = strdup(dbname);
+				asprintf(&prompt, "%s> ", database);
+			}
+			else {
+				printf("Invalid passphrase.\n");
+			}
 		}
 	}
 	// Close the current password database.
