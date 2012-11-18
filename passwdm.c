@@ -1,19 +1,46 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
-#define LINE_BUFFER_SIZE 1024
+#define COMMAND_DELIMETERS " \t\r\n"
+
+void perform_command(char *);
 
 int main(int argc, char *argv[]) {
-	// Create a buffer to store input in.
-	char line_buffer[LINE_BUFFER_SIZE];
+	// Prevent TAB from auto-completing file names.
+	rl_bind_key('\t', rl_insert);
 
-	// Receive input from standard input.
-	while(1) {
-		printf("> ");
-		// If fgets returns NULL, it means there was an error, or an EOF was received.
-		if(fgets(line_buffer, 1024, stdin) == NULL)
+	// Read commands from the user.
+	char *command;
+	while((command = readline("> ")) != NULL) {
+		// Maintain a history of commands.
+		if(*command)
+			add_history(command);
+
+		// Catch exit commands.
+		if(strcmp(command, "quit") == 0 || strcmp(command, "exit") == 0)
 			break;
+		// Handle commands.
+		else
+			perform_command(command);
+
+		free(command);
 	}
 
-	printf("\n");
+	// If EOF was received, output a new line.
+	if(command == NULL)
+		printf("\n");
+	
 	return 0;
+}
+
+void perform_command(char *command) {
+	char *keyword = strtok(command, COMMAND_DELIMETERS);
+	if(keyword == NULL)
+		return;
+	else {
+		printf("%s: command not found\n", keyword);
+	}
 }
