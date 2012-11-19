@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -13,6 +16,22 @@ char *database = NULL;
 char *prompt = "> ";
 
 int main(int argc, char *argv[]) {
+	// Check that password database directory exists, and if not creates it.
+	char *home_dir = getenv("HOME");
+	if(home_dir == NULL) {
+		fprintf(stderr, "Unable to locate home directory.");
+		return 1;
+	}
+	char *config_dir;
+	if(asprintf(&config_dir, "%s/.passwdm", home_dir) == -1) {
+		fprintf(stderr, "Out of memory.\n");
+		return 1;
+	}
+	if(mkdir(config_dir, S_IRUSR | S_IWUSR | S_IXUSR) == -1 && errno != EEXIST) {
+		fprintf(stderr, "Unable to create password database directory.\n");
+		return 1;
+	}
+
 	// Prevent TAB from auto-completing file names.
 	rl_bind_key('\t', rl_insert);
 
@@ -62,12 +81,18 @@ void perform_command(char *command) {
 		else {
 			// Get passphrase for this database.
 			char *pass_prompt;
-			asprintf(&pass_prompt, "Passphrase for %s: ", dbname);
+			if(asprintf(&pass_prompt, "Passphrase for %s: ", dbname) == -1) {
+				printf("Out of memory.\n");
+				return;
+			}
 			char *passphrase = getpass(pass_prompt);
 			// Validate passphrase.
 			if(passphrase) {
 				database = strdup(dbname);
-				asprintf(&prompt, "%s> ", database);
+				if(asprintf(&prompt, "%s> ", database) == -1) {
+					printf("Out of memory.\n");
+					return;
+				}
 			}
 			else {
 				printf("Invalid passphrase.\n");
