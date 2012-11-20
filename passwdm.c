@@ -43,7 +43,20 @@ int main(int argc, char *argv[]) {
 
 	// Read commands from the user.
 	char *command;
-	while((command = readline(prompt)) != NULL) {
+	while(1) {
+		command = readline(prompt);
+		if(command == NULL) {
+			if(database != NULL) {
+				printf("close\n");
+				close_database();
+				continue;
+			}
+			else {
+				printf("exit\n");
+				break;
+			}
+		}
+
 		// Maintain a history of commands.
 		if(*command)
 			add_history(command);
@@ -58,11 +71,7 @@ int main(int argc, char *argv[]) {
 		free(command);
 	}
 
-
 	close_database();
-	// If EOF was received, output a new line.
-	if(command == NULL)
-		printf("\n");
 
 	return 0;
 }
@@ -112,7 +121,7 @@ void perform_command(char *command) {
 	// Close the current password database.
 	else if(strcmp(keyword, "close") == 0) {
 		char *arg = strtok(NULL, COMMAND_DELIMETERS);
-		if(arg != NULL) {
+		if(arg != NULL && strcmp(arg, database) != 0) {
 			printf("Unknown argument: %s\n", arg);
 		}
 		else if(database == NULL) {
