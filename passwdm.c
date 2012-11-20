@@ -10,17 +10,30 @@
 #include <readline/history.h>
 
 #define COMMAND_DELIMETERS " \t\r\n"
+#define DEFAULT_PROMPT "> "
+
+#define DATABASE_SIGNATURE 0x5057444d
+
+struct database_header {
+	uint32_t signature;
+};
+
+struct database {
+	char *name;
+	int fd;
+	struct database_header *header;
+};
 
 void perform_command(char *);
 void create_database(char *);
 void open_database(char *);
 void close_database();
+void save_database();
 
 char *db_dir = NULL;
+char *prompt = DEFAULT_PROMPT;
 
-char *database = NULL;
-char *prompt = "> ";
-FILE *db_file = NULL;
+struct database *db = NULL;
 
 int main(int argc, char *argv[]) {
 	// Check that password database directory exists, and if not creates it.
@@ -46,7 +59,7 @@ int main(int argc, char *argv[]) {
 	while(1) {
 		command = readline(prompt);
 		if(command == NULL) {
-			if(database != NULL) {
+			if(db != NULL) {
 				printf("close\n");
 				close_database();
 				continue;
@@ -91,7 +104,7 @@ void perform_command(char *command) {
 		else if(db_name == NULL) {
 			printf("Password database name required.\n");
 		}
-		else if(database != NULL) {
+		else if(db != NULL) {
 			printf("Current password database must be closed before another one can be created.\n");
 		}
 		// Change to the database and update the prompt.
@@ -110,7 +123,7 @@ void perform_command(char *command) {
 		else if(db_name == NULL) {
 			printf("Password database name required.\n");
 		}
-		else if(database != NULL) {
+		else if(db != NULL) {
 			printf("Current password database must be closed before another one can be opened.\n");
 		}
 		// Change to the database and update the prompt.
@@ -121,11 +134,11 @@ void perform_command(char *command) {
 	// Close the current password database.
 	else if(strcmp(keyword, "close") == 0) {
 		char *arg = strtok(NULL, COMMAND_DELIMETERS);
-		if(arg != NULL && strcmp(arg, database) != 0) {
-			printf("Unknown argument: %s\n", arg);
-		}
-		else if(database == NULL) {
+		if(db == NULL) {
 			printf("No password database currently open.\n");
+		}
+		else if(arg != NULL && strcmp(arg, db->name) != 0) {
+			printf("Unknown argument: %s\n", arg);
 		}
 		else {
 			close_database();
@@ -137,6 +150,13 @@ void perform_command(char *command) {
 }
 
 void create_database(char *db_name) {
+	// Get passphrase for this database.
+	char *pass_prompt;
+	if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
+		printf("Out of memory.\n");
+		return;
+	}
+	char *passphrase = getpass(pass_prompt);
 	char *db_filename;
 	if(asprintf(&db_filename, "%s/%s", db_dir, db_name) == -1) {
 		printf("Out of memory.\n");
@@ -153,18 +173,33 @@ void create_database(char *db_name) {
 			return;
 		}
 	}
-	FILE *db = fdopen(db_fd, "w");
-	if(db == NULL) {
-		printf("%s: error creating password database.\n", db_name);
-		return;
-	}
-	database = strdup(db_name);
-	if(asprintf(&prompt, "%s> ", database) == -1) {
+	struct database *d = (struct database *)malloc(sizeof(struct database));
+	if(d == NULL) {
 		printf("Out of memory.\n");
-		fclose(db);
+		close(db_fd);
 		return;
 	}
-	db_file = db;
+	d->name = strdup(db_name);
+	if(d->name == NULL) {
+		printf("Out of memory.\n");
+		close(db_fd);
+		return;
+	}
+	d->fd = db_fd;
+	d->header = (struct database_header *)malloc(sizeof(struct database_header));
+	if(d->header == NULL) {
+		printf("Out of memory.\n");
+		close(db_fd);
+		return;
+	}
+	d->header->signature = DATABASE_SIGNATURE;
+	if(asprintf(&prompt, "%s> ", db_name) == -1) {
+		printf("Out of memory.\n");
+		prompt = DEFAULT_PROMPT;
+		close(db_fd);
+		return;
+	}
+	db = d;
 }
 
 void open_database(char *db_name) {
@@ -173,8 +208,8 @@ void open_database(char *db_name) {
 		printf("Out of memory.\n");
 		return;
 	}
-	FILE *db = fopen(db_filename, "rb");
-	if(db == NULL) {
+	int db_fd = open(db_filename, O_RDWR);
+	if(db_fd == -1) {
 		printf("%s: password database not found.\n", db_name);
 		return;
 	}
@@ -182,29 +217,73 @@ void open_database(char *db_name) {
 	char *pass_prompt;
 	if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
 		printf("Out of memory.\n");
-		fclose(db);
+		close(db_fd);
 		return;
 	}
 	char *passphrase = getpass(pass_prompt);
 	// Validate passphrase.
 	if(passphrase) {
-		database = strdup(db_name);
-		if(asprintf(&prompt, "%s> ", database) == -1) {
+		struct database *d = (struct database *)malloc(sizeof(struct database));
+		if(d == NULL) {
 			printf("Out of memory.\n");
-			fclose(db);
+			close(db_fd);
 			return;
 		}
-		db_file = db;
+		d->name = strdup(db_name);
+		if(d->name == NULL) {
+			printf("Out of memory.\n");
+			close(db_fd);
+			return;
+		}
+		d->fd = db_fd;
+		d->header = (struct database_header *)malloc(sizeof(struct database_header));
+		if(d->header == NULL) {
+			printf("Out of memory.\n");
+			close(db_fd);
+			return;
+		}
+		if(read(db_fd, d->header, sizeof(struct database_header)) < (ssize_t)sizeof(struct database_header)) {
+			printf("Invalid database file.\n");
+			close(db_fd);
+			return;
+		}
+		if(d->header->signature != DATABASE_SIGNATURE) {
+			printf("Out of memory.\n");
+			close(db_fd);
+			return;
+		}
+		if(asprintf(&prompt, "%s> ", db_name) == -1) {
+			printf("Out of memory.\n");
+			prompt = DEFAULT_PROMPT;
+			close(db_fd);
+			return;
+		}
+		db = d;
 	}
 	else {
 		printf("Invalid passphrase.\n");
-		fclose(db);
+		close(db_fd);
 	}
 }
 
 void close_database() {
-	if(db_file != NULL)
-		fclose(db_file);
-	prompt = "> ";
-	database = NULL;
+	if(db != NULL) {
+		save_database();
+		close(db->fd);
+	}
+	prompt = DEFAULT_PROMPT;
+	db = NULL;
+}
+
+void save_database() {
+	if(lseek(db->fd, 0, SEEK_SET) == -1) {
+		printf("Error saving database.\n");
+		close(db->fd);
+		return;
+	}
+	if(write(db->fd, db->header, sizeof(struct database_header)) < (ssize_t)sizeof(struct database_header)) {
+		printf("Error saving database.\n");
+		close(db->fd);
+		return;
+	}
 }
