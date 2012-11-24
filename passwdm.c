@@ -16,6 +16,8 @@
  *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,7 +44,7 @@ struct database_header {
 struct database {
 	char *name;
 	int fd;
-	char key[64];
+	unsigned char key[64];
 	struct database_header *header;
 };
 
@@ -208,7 +210,7 @@ void create_database(char *db_name) {
 		return;
 	}
 	// Generate the key .
-	sha2(passphrase, strlen(passphrase), db->key, 0);
+	sha2((unsigned char *)passphrase, strlen(passphrase), db->key, 0);
 	d->fd = db_fd;
 	d->header = (struct database_header *)malloc(sizeof(struct database_header));
 	if(d->header == NULL) {
@@ -270,7 +272,7 @@ void open_database(char *db_name) {
 		close(db_fd);
 		return;
 	}
-	sha2(passphrase, strlen(passphrase), d->key, 0);
+	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
 	if(d->header->signature != DATABASE_SIGNATURE) {
 		printf("Invalid passphrase.\n");
 		close(db_fd);
