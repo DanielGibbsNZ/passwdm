@@ -1,3 +1,21 @@
+/*
+ *   Passwdm: CLI-based password manager.
+ *   Copyright (C) 2012  Daniel Gibbs
+ *
+ *   This program is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +26,8 @@
 #include <sys/types.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include "polarssl/sha2.c"
+#include "polarssl/aes.c"
 
 #define COMMAND_DELIMETERS " \t\r\n"
 #define DEFAULT_PROMPT "> "
@@ -21,6 +41,7 @@ struct database_header {
 struct database {
 	char *name;
 	int fd;
+	char key[64];
 	struct database_header *header;
 };
 
@@ -35,7 +56,7 @@ char *prompt = DEFAULT_PROMPT;
 
 struct database *db = NULL;
 
-int main(int argc, char *argv[]) {
+int main() {
 	// Check that password database directory exists, and if not creates it.
 	char *home_dir = getenv("HOME");
 	if(home_dir == NULL) {
@@ -185,6 +206,8 @@ void create_database(char *db_name) {
 		close(db_fd);
 		return;
 	}
+	// Generate the key .
+	sha2(passphrase, strlen(passphrase), db->key, 0);
 	d->fd = db_fd;
 	d->header = (struct database_header *)malloc(sizeof(struct database_header));
 	if(d->header == NULL) {
@@ -222,48 +245,43 @@ void open_database(char *db_name) {
 	}
 	char *passphrase = getpass(pass_prompt);
 	// Validate passphrase.
-	if(passphrase) {
-		struct database *d = (struct database *)malloc(sizeof(struct database));
-		if(d == NULL) {
-			printf("Out of memory.\n");
-			close(db_fd);
-			return;
-		}
-		d->name = strdup(db_name);
-		if(d->name == NULL) {
-			printf("Out of memory.\n");
-			close(db_fd);
-			return;
-		}
-		d->fd = db_fd;
-		d->header = (struct database_header *)malloc(sizeof(struct database_header));
-		if(d->header == NULL) {
-			printf("Out of memory.\n");
-			close(db_fd);
-			return;
-		}
-		if(read(db_fd, d->header, sizeof(struct database_header)) < (ssize_t)sizeof(struct database_header)) {
-			printf("Invalid database file.\n");
-			close(db_fd);
-			return;
-		}
-		if(d->header->signature != DATABASE_SIGNATURE) {
-			printf("Out of memory.\n");
-			close(db_fd);
-			return;
-		}
-		if(asprintf(&prompt, "%s> ", db_name) == -1) {
-			printf("Out of memory.\n");
-			prompt = DEFAULT_PROMPT;
-			close(db_fd);
-			return;
-		}
-		db = d;
+	struct database *d = (struct database *)malloc(sizeof(struct database));
+	if(d == NULL) {
+		printf("Out of memory.\n");
+		close(db_fd);
+		return;
 	}
-	else {
+	d->name = strdup(db_name);
+	if(d->name == NULL) {
+		printf("Out of memory.\n");
+		close(db_fd);
+		return;
+	}
+	d->fd = db_fd;
+	d->header = (struct database_header *)malloc(sizeof(struct database_header));
+	if(d->header == NULL) {
+		printf("Out of memory.\n");
+		close(db_fd);
+		return;
+	}
+	if(read(db_fd, d->header, sizeof(struct database_header)) < (ssize_t)sizeof(struct database_header)) {
+		printf("Invalid database file.\n");
+		close(db_fd);
+		return;
+	}
+	sha2(passphrase, strlen(passphrase), d->key, 0);
+	if(d->header->signature != DATABASE_SIGNATURE) {
 		printf("Invalid passphrase.\n");
 		close(db_fd);
+		return;
 	}
+	if(asprintf(&prompt, "%s> ", db_name) == -1) {
+		printf("Out of memory.\n");
+		prompt = DEFAULT_PROMPT;
+		close(db_fd);
+		return;
+	}
+	db = d;
 }
 
 void close_database() {
