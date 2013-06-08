@@ -37,14 +37,20 @@
 
 #define DATABASE_SIGNATURE 0x5057444d
 
+#define KEY_SIZE 32
+#define IV_SIZE 16
+
 struct database_header {
 	uint32_t signature;
+	uint32_t signature2;
+	uint32_t signature3;
+	uint32_t signature4;
 };
 
 struct database {
 	char *name;
 	int fd;
-	unsigned char key[64];
+	unsigned char key[KEY_SIZE];
 	struct database_header *header;
 };
 
@@ -209,8 +215,8 @@ void create_database(char *db_name) {
 		close(db_fd);
 		return;
 	}
-	// Generate the key .
-	sha2((unsigned char *)passphrase, strlen(passphrase), db->key, 0);
+	// Generate the key.
+	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
 	d->fd = db_fd;
 	d->header = (struct database_header *)malloc(sizeof(struct database_header));
 	if(d->header == NULL) {
@@ -267,12 +273,37 @@ void open_database(char *db_name) {
 		close(db_fd);
 		return;
 	}
-	if(read(db_fd, d->header, sizeof(struct database_header)) < (ssize_t)sizeof(struct database_header)) {
+	// Read IV first.
+	unsigned char iv[IV_SIZE];
+	if(read(db_fd, iv, IV_SIZE) < IV_SIZE) {
 		printf("Invalid database file.\n");
 		close(db_fd);
 		return;
 	}
+
+	// Create key.
 	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
+
+	// Read encrypted data.
+	if(read(db_fd, d->header, sizeof(struct database_header)) < (int)sizeof(struct database_header)) {
+		printf("Invalid database file.\n");
+		close(db_fd);
+		return;
+	}
+
+	// Decrypt.
+	aes_context ctx;
+	if(aes_setkey_dec(&ctx, d->key, KEY_SIZE * 8) != 0) {
+		printf("Error loading database.\n");
+		close(db_fd);
+		return;
+	}
+	if(aes_crypt_cbc(&ctx, AES_DECRYPT, sizeof(struct database_header), iv, (unsigned char *)d->header, (unsigned char *)d->header) != 0 ) {
+		printf("Error loading database.\n");
+		close(db_fd);
+		return;
+	}
+
 	if(d->header->signature != DATABASE_SIGNATURE) {
 		printf("Invalid passphrase.\n");
 		close(db_fd);
@@ -297,14 +328,58 @@ void close_database() {
 }
 
 void save_database() {
+	// Start writing at the beginning of the file.
 	if(lseek(db->fd, 0, SEEK_SET) == -1) {
 		printf("Error saving database.\n");
 		close(db->fd);
 		return;
 	}
-	if(write(db->fd, db->header, sizeof(struct database_header)) < (ssize_t)sizeof(struct database_header)) {
-		printf("Error saving database.\n");
+
+	// Prepare data to be written.
+	ssize_t n = (ssize_t)sizeof(struct database_header);
+	unsigned char *encrypted = (unsigned char *)malloc(n);
+	if(encrypted == NULL) {
+		printf("Out of memory.\n");
 		close(db->fd);
 		return;
 	}
+
+	// Preapre IV.
+	unsigned char iv[IV_SIZE], iv_updated[IV_SIZE];
+	memcpy(iv, "1234567890123456", IV_SIZE);
+	memcpy(iv_updated, iv, IV_SIZE);
+
+	// Encrypt.
+	aes_context ctx;
+	if(aes_setkey_enc(&ctx, db->key, KEY_SIZE * 8) != 0) {
+		printf("Error saving database.\n");
+		close(db->fd);
+		free(encrypted);
+		return;
+	}
+	if(aes_crypt_cbc(&ctx, AES_ENCRYPT, n, iv_updated, (unsigned char *)db->header, encrypted) != 0) {
+		printf("Error saving database.\n");
+		close(db->fd);
+		free(encrypted);
+		return;
+	}
+
+	// Write IV first.
+	if(write(db->fd, iv, IV_SIZE) < IV_SIZE) {
+		printf("Error saving database.\n");
+		close(db->fd);
+		free(encrypted);
+		return;
+	}
+
+	// Write encrypted data.
+	if(write(db->fd, encrypted, n) < n) {
+		printf("Error saving database.\n");
+		close(db->fd);
+		free(encrypted);
+		return;
+	}
+
+	close(db->fd);
+	free(encrypted);
 }
