@@ -18,19 +18,20 @@
 
 #define _GNU_SOURCE
 
+#include "polarssl/sha2.h"
+#include "polarssl/aes.h"
+
+#include <errno.h>
+#include <fcntl.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <readline/readline.h>
-#include <readline/history.h>
-#include "polarssl/sha2.c"
-#include "polarssl/aes.c"
+#include <unistd.h>
 
 #define COMMAND_DELIMETERS " \t\r\n"
 #define DEFAULT_PROMPT "> "

@@ -1,2 +1,2 @@
 passwdm: passwdm.c
-	gcc passwdm.c -o passwdm -lreadline -Wall -Wextra
+	gcc passwdm.c polarssl/*.c -o passwdm -lreadline -Wall -Wextra
