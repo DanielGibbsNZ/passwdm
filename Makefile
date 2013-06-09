@@ -1,2 +1,4 @@
+CC = clang
+
 passwdm: passwdm.c
-	gcc passwdm.c polarssl/*.c -o passwdm -lreadline -Wall -Wextra
+	$(CC) passwdm.c polarssl/*.c -o passwdm -lreadline -Wall -Wextra
