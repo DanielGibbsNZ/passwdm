@@ -14,4 +14,4 @@ polarssl/sha2.o: polarssl/sha256.c polarssl/sha256.h
 
 .PHONY: clean
 clean:
-	rm -f *.o passwdm
+	rm -f *.o polarssl/*.o passwdm
