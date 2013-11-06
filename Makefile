@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -Werror
+CFLAGS = -Wall -Wextra -Werror -D_GNU_SOURCE
 LIBS = -lreadline
 TARGET = passwdm
 
