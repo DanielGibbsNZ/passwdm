@@ -17,8 +17,6 @@
  */
 
 #include "database.h"
-#include "polarssl/sha2.h"
-#include "polarssl/aes.h"
 
 #include <errno.h>
 #include <fcntl.h>

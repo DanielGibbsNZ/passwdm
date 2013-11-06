@@ -19,7 +19,7 @@
 #include "database.h"
 
 #include "polarssl/aes.h"
-#include "polarssl/sha2.h"
+#include "polarssl/sha256.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -63,7 +63,7 @@ int create_database(struct database **database, char *filename, char *passphrase
 	d->header->signature = DATABASE_SIGNATURE;
 
 	// Generate the key.
-	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
+	sha256((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
 
 	// Zero the password.
 	memset(passphrase, 0, strlen(passphrase));
@@ -104,7 +104,7 @@ int open_database(struct database **database, char *filename, char *passphrase) 
 	}
 
 	// Generate the key.
-	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
+	sha256((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
 
 	// Zero the passphrase.
 	memset(passphrase, 0, strlen(passphrase));
