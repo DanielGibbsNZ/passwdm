@@ -217,6 +217,8 @@ void create_database(char *db_name) {
 	}
 	// Generate the key.
 	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
+	// Zero the password.
+	memset(passphrase, 0, strlen(passphrase));
 	d->fd = db_fd;
 	d->header = (struct database_header *)malloc(sizeof(struct database_header));
 	if(d->header == NULL) {
@@ -283,6 +285,8 @@ void open_database(char *db_name) {
 
 	// Create key.
 	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
+	// Zero the password.
+	memset(passphrase, 0, strlen(passphrase));
 
 	// Read encrypted data.
 	if(read(db_fd, d->header, sizeof(struct database_header)) < (int)sizeof(struct database_header)) {
