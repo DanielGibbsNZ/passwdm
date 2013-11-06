@@ -9,7 +9,6 @@ The hashing and encryption/decryption performed by this program are done using c
 Dependencies
 ------------
 - The GNU Readline Library (libreadline)
-- All the standard C libraries.
 
 Contributing
 ------------
