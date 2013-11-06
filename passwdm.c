@@ -16,6 +16,10 @@
  *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "database.h"
+#include "polarssl/sha2.h"
+#include "polarssl/aes.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -29,41 +33,15 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
-#include "polarssl/sha2.h"
-#include "polarssl/aes.h"
-
 #define COMMAND_DELIMETERS " \t\r\n"
 #define DEFAULT_PROMPT "> "
 
-#define DATABASE_SIGNATURE 0x5057444d
+static void perform_command(char *);
+static void save_and_close();
 
-#define KEY_SIZE 32
-#define IV_SIZE 16
-
-struct database_header {
-	uint32_t signature;
-	uint32_t signature2;
-	uint32_t signature3;
-	uint32_t signature4;
-};
-
-struct database {
-	char *name;
-	int fd;
-	unsigned char key[KEY_SIZE];
-	struct database_header *header;
-};
-
-void perform_command(char *);
-void create_database(char *);
-void open_database(char *);
-void close_database();
-void save_database();
-
-char *db_dir = NULL;
-char *prompt = DEFAULT_PROMPT;
-
-struct database *db = NULL;
+static char *db_dir = NULL;
+static char *prompt = DEFAULT_PROMPT;
+static struct database *db = NULL;
 
 int main() {
 	// Check that password database directory exists, and if not creates it.
@@ -91,7 +69,7 @@ int main() {
 		if(command == NULL) {
 			if(db != NULL) {
 				printf("close\n");
-				close_database();
+				save_and_close();
 				continue;
 			}
 			else {
@@ -114,8 +92,7 @@ int main() {
 		free(command);
 	}
 
-	close_database();
-
+	save_and_close();
 	return 0;
 }
 
@@ -139,7 +116,27 @@ void perform_command(char *command) {
 		}
 		// Change to the database and update the prompt.
 		else {
-			create_database(db_name);
+			char *db_filename;
+			if(asprintf(&db_filename, "%s/%s", db_dir, db_name) == -1) {
+				printf("Out of memory.\n");
+				return;
+			}
+			if(asprintf(&prompt, "%s> ", db_name) == -1) {
+				printf("Out of memory.\n");
+				prompt = DEFAULT_PROMPT;
+				return;
+			}
+			char *pass_prompt;
+			if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
+				printf("Out of memory.\n");
+				return;
+			}
+			char *passphrase = getpass(pass_prompt);
+			if(create_database(&db, db_filename, passphrase) != 0) {
+				printf("Error creating database.\n");
+				prompt = DEFAULT_PROMPT;
+				return;
+			}
 		}
 	}
 	// Open a password database.
@@ -158,7 +155,27 @@ void perform_command(char *command) {
 		}
 		// Change to the database and update the prompt.
 		else {
-			open_database(db_name);
+			char *db_filename;
+			if(asprintf(&db_filename, "%s/%s", db_dir, db_name) == -1) {
+				printf("Out of memory.\n");
+				return;
+			}
+			if(asprintf(&prompt, "%s> ", db_name) == -1) {
+				printf("Out of memory.\n");
+				prompt = DEFAULT_PROMPT;
+				return;
+			}
+			char *pass_prompt;
+			if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
+				printf("Out of memory.\n");
+				return;
+			}
+			char *passphrase = getpass(pass_prompt);
+			if(open_database(&db, db_filename, passphrase) != 0) {
+				printf("Error opening database.\n");
+				prompt = DEFAULT_PROMPT;
+				return;
+			}
 		}
 	}
 	// Close the current password database.
@@ -171,7 +188,7 @@ void perform_command(char *command) {
 			printf("Unknown argument: %s\n", arg);
 		}
 		else {
-			close_database();
+			save_and_close();
 		}
 	}
 	else {
@@ -179,211 +196,13 @@ void perform_command(char *command) {
 	}
 }
 
-void create_database(char *db_name) {
-	// Get passphrase for this database.
-	char *pass_prompt;
-	if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
-		printf("Out of memory.\n");
+void save_and_close() {
+	if(db == NULL)
 		return;
+	if(save_database(db) != 0) {
+		printf("Error saving database.\n");
 	}
-	char *passphrase = getpass(pass_prompt);
-	char *db_filename;
-	if(asprintf(&db_filename, "%s/%s", db_dir, db_name) == -1) {
-		printf("Out of memory.\n");
-		return;
-	}
-	int db_fd = open(db_filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-	if(db_fd == -1) {
-		if(errno == EEXIST) {
-			printf("%s: password database already exists.\n", db_name);
-			return;
-		}
-		else {
-			printf("%s: error creating password database.\n", db_name);
-			return;
-		}
-	}
-	struct database *d = (struct database *)malloc(sizeof(struct database));
-	if(d == NULL) {
-		printf("Out of memory.\n");
-		close(db_fd);
-		return;
-	}
-	d->name = strdup(db_name);
-	if(d->name == NULL) {
-		printf("Out of memory.\n");
-		close(db_fd);
-		return;
-	}
-	// Generate the key.
-	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
-	// Zero the password.
-	memset(passphrase, 0, strlen(passphrase));
-	d->fd = db_fd;
-	d->header = (struct database_header *)malloc(sizeof(struct database_header));
-	if(d->header == NULL) {
-		printf("Out of memory.\n");
-		close(db_fd);
-		return;
-	}
-	d->header->signature = DATABASE_SIGNATURE;
-	if(asprintf(&prompt, "%s> ", db_name) == -1) {
-		printf("Out of memory.\n");
-		prompt = DEFAULT_PROMPT;
-		close(db_fd);
-		return;
-	}
-	db = d;
-}
-
-void open_database(char *db_name) {
-	char *db_filename;
-	if(asprintf(&db_filename, "%s/%s", db_dir, db_name) == -1) {
-		printf("Out of memory.\n");
-		return;
-	}
-	int db_fd = open(db_filename, O_RDWR);
-	if(db_fd == -1) {
-		printf("%s: password database not found.\n", db_name);
-		return;
-	}
-	// Get passphrase for this database.
-	char *pass_prompt;
-	if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
-		printf("Out of memory.\n");
-		close(db_fd);
-		return;
-	}
-	char *passphrase = getpass(pass_prompt);
-	// Validate passphrase.
-	struct database *d = (struct database *)malloc(sizeof(struct database));
-	if(d == NULL) {
-		printf("Out of memory.\n");
-		close(db_fd);
-		return;
-	}
-	d->name = strdup(db_name);
-	if(d->name == NULL) {
-		printf("Out of memory.\n");
-		close(db_fd);
-		return;
-	}
-	d->fd = db_fd;
-	d->header = (struct database_header *)malloc(sizeof(struct database_header));
-	if(d->header == NULL) {
-		printf("Out of memory.\n");
-		close(db_fd);
-		return;
-	}
-	// Read IV first.
-	unsigned char iv[IV_SIZE];
-	if(read(db_fd, iv, IV_SIZE) < IV_SIZE) {
-		printf("Invalid database file.\n");
-		close(db_fd);
-		return;
-	}
-
-	// Create key.
-	sha2((unsigned char *)passphrase, strlen(passphrase), d->key, 0);
-	// Zero the password.
-	memset(passphrase, 0, strlen(passphrase));
-
-	// Read encrypted data.
-	if(read(db_fd, d->header, sizeof(struct database_header)) < (int)sizeof(struct database_header)) {
-		printf("Invalid database file.\n");
-		close(db_fd);
-		return;
-	}
-
-	// Decrypt.
-	aes_context ctx;
-	if(aes_setkey_dec(&ctx, d->key, KEY_SIZE * 8) != 0) {
-		printf("Error loading database.\n");
-		close(db_fd);
-		return;
-	}
-	if(aes_crypt_cbc(&ctx, AES_DECRYPT, sizeof(struct database_header), iv, (unsigned char *)d->header, (unsigned char *)d->header) != 0 ) {
-		printf("Error loading database.\n");
-		close(db_fd);
-		return;
-	}
-
-	if(d->header->signature != DATABASE_SIGNATURE) {
-		printf("Invalid passphrase.\n");
-		close(db_fd);
-		return;
-	}
-	if(asprintf(&prompt, "%s> ", db_name) == -1) {
-		printf("Out of memory.\n");
-		prompt = DEFAULT_PROMPT;
-		close(db_fd);
-		return;
-	}
-	db = d;
-}
-
-void close_database() {
-	if(db != NULL) {
-		save_database();
-		close(db->fd);
-	}
+	close_database(db);
 	prompt = DEFAULT_PROMPT;
 	db = NULL;
-}
-
-void save_database() {
-	// Start writing at the beginning of the file.
-	if(lseek(db->fd, 0, SEEK_SET) == -1) {
-		printf("Error saving database.\n");
-		close(db->fd);
-		return;
-	}
-
-	// Prepare data to be written.
-	ssize_t n = (ssize_t)sizeof(struct database_header);
-	unsigned char *encrypted = (unsigned char *)malloc(n);
-	if(encrypted == NULL) {
-		printf("Out of memory.\n");
-		close(db->fd);
-		return;
-	}
-
-	// Preapre IV.
-	unsigned char iv[IV_SIZE], iv_updated[IV_SIZE];
-	memcpy(iv, "1234567890123456", IV_SIZE);
-	memcpy(iv_updated, iv, IV_SIZE);
-
-	// Encrypt.
-	aes_context ctx;
-	if(aes_setkey_enc(&ctx, db->key, KEY_SIZE * 8) != 0) {
-		printf("Error saving database.\n");
-		close(db->fd);
-		free(encrypted);
-		return;
-	}
-	if(aes_crypt_cbc(&ctx, AES_ENCRYPT, n, iv_updated, (unsigned char *)db->header, encrypted) != 0) {
-		printf("Error saving database.\n");
-		close(db->fd);
-		free(encrypted);
-		return;
-	}
-
-	// Write IV first.
-	if(write(db->fd, iv, IV_SIZE) < IV_SIZE) {
-		printf("Error saving database.\n");
-		close(db->fd);
-		free(encrypted);
-		return;
-	}
-
-	// Write encrypted data.
-	if(write(db->fd, encrypted, n) < n) {
-		printf("Error saving database.\n");
-		close(db->fd);
-		free(encrypted);
-		return;
-	}
-
-	close(db->fd);
-	free(encrypted);
 }
