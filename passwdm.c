@@ -116,22 +116,22 @@ void perform_command(char *command) {
 		else {
 			char *db_filename;
 			if(asprintf(&db_filename, "%s/%s", db_dir, db_name) == -1) {
-				printf("Out of memory.\n");
+				fprintf(stderr, "Out of memory.\n");
 				return;
 			}
 			if(asprintf(&prompt, "%s> ", db_name) == -1) {
-				printf("Out of memory.\n");
+				fprintf(stderr, "Out of memory.\n");
 				prompt = DEFAULT_PROMPT;
 				return;
 			}
 			char *pass_prompt;
 			if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
-				printf("Out of memory.\n");
+				fprintf(stderr, "Out of memory.\n");
 				return;
 			}
 			char *passphrase = getpass(pass_prompt);
 			if(create_database(&db, db_filename, passphrase) != 0) {
-				printf("Error creating database.\n");
+				database_perror("Error creating database");
 				prompt = DEFAULT_PROMPT;
 				return;
 			}
@@ -155,22 +155,22 @@ void perform_command(char *command) {
 		else {
 			char *db_filename;
 			if(asprintf(&db_filename, "%s/%s", db_dir, db_name) == -1) {
-				printf("Out of memory.\n");
+				fprintf(stderr, "Out of memory.\n");
 				return;
 			}
 			if(asprintf(&prompt, "%s> ", db_name) == -1) {
-				printf("Out of memory.\n");
+				fprintf(stderr, "Out of memory.\n");
 				prompt = DEFAULT_PROMPT;
 				return;
 			}
 			char *pass_prompt;
 			if(asprintf(&pass_prompt, "Passphrase for %s: ", db_name) == -1) {
-				printf("Out of memory.\n");
+				fprintf(stderr, "Out of memory.\n");
 				return;
 			}
 			char *passphrase = getpass(pass_prompt);
 			if(open_database(&db, db_filename, passphrase) != 0) {
-				printf("Error opening database.\n");
+				database_perror("Error opening database");
 				prompt = DEFAULT_PROMPT;
 				return;
 			}
@@ -198,7 +198,7 @@ void save_and_close() {
 	if(db == NULL)
 		return;
 	if(save_database(db) != 0) {
-		printf("Error saving database.\n");
+		database_perror("Error saving database");
 	}
 	close_database(db);
 	prompt = DEFAULT_PROMPT;

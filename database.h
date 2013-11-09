@@ -42,4 +42,6 @@ int open_database(struct database **, char *, char *);
 int save_database(struct database *);
 void close_database(struct database *);
 
+void database_perror(char *);
+
 #endif

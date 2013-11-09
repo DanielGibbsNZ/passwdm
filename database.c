@@ -31,16 +31,42 @@
 #define DATABASE_SIGNATURE 0x5057444d
 #define IV_SIZE 16
 
+#define DATABASE_ERROR_SYS -1
+#define DATABASE_ERROR_OK 0
+#define DATABASE_ERROR_IO 1
+#define DATABASE_ERROR_KEY 2
+#define DATABASE_ERROR_ENCRYPT 3
+#define DATABASE_ERROR_DECRYPT 4
+#define DATABASE_ERROR_PASSPHRASE 5
+
+static int database_errno = 0;
+
+static char *database_strerror(int error) {
+	switch(error) {
+		case DATABASE_ERROR_SYS: return strerror(errno);
+		case DATABASE_ERROR_OK: return "Success";
+		case DATABASE_ERROR_IO: return "I/O error";
+		case DATABASE_ERROR_KEY: return "Invalid key";
+		case DATABASE_ERROR_ENCRYPT: return "Encryption failed";
+		case DATABASE_ERROR_DECRYPT: return "Decryption failed";
+		case DATABASE_ERROR_PASSPHRASE: return "Incorrect passphrase";
+		default: return "Unknown error";
+	}
+}
+
 int create_database(struct database **database, char *filename, char *passphrase) {
 	// Open the database file.
 	int fd;
-	if((fd = open(filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1)
+	if((fd = open(filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1) {
+		database_errno = DATABASE_ERROR_SYS;
 		return -1;
+	}
 
 	// Setup the database structure.
 	struct database *d = (struct database *)calloc(1, sizeof(struct database));
 	if(!d) {
 		errno = ENOMEM;
+		database_errno = DATABASE_ERROR_SYS;
 		close(fd);
 		return -1;
 	}
@@ -48,6 +74,7 @@ int create_database(struct database **database, char *filename, char *passphrase
 	d->name = strdup(filename);
 	if(!d->name) {
 		errno = ENOMEM;
+		database_errno = DATABASE_ERROR_SYS;
 		free(d);
 		close(fd);
 		return -1;
@@ -55,6 +82,7 @@ int create_database(struct database **database, char *filename, char *passphrase
 	d->header = (struct database_header *)malloc(sizeof(struct database_header));
 	if(!d->header) {
 		errno = ENOMEM;
+		database_errno = DATABASE_ERROR_SYS;
 		free(d->name);
 		free(d);
 		close(fd);
@@ -76,8 +104,10 @@ int create_database(struct database **database, char *filename, char *passphrase
 int open_database(struct database **database, char *filename, char *passphrase) {
 	// Open the database file.
 	int fd;
-	if((fd = open(filename, O_RDWR)) == -1)
+	if((fd = open(filename, O_RDWR)) == -1) {
+		database_errno = -1;
 		return -1;
+	}
 
 #define fail() 	free(d->name); \
 				free(d->header); \
@@ -89,17 +119,20 @@ int open_database(struct database **database, char *filename, char *passphrase) 
 	struct database *d = (struct database *)calloc(1, sizeof(struct database));
 	if(!d) {
 		errno = ENOMEM;
+		database_errno = DATABASE_ERROR_SYS;
 		fail();
 	}
 	d->fd = fd;
 	d->name = strdup(filename);
 	if(!d->name) {
 		errno = ENOMEM;
+		database_errno = DATABASE_ERROR_SYS;
 		fail();
 	}
 	d->header = (struct database_header *)calloc(1, sizeof(struct database_header));
 	if(!d->header) {
 		errno = ENOMEM;
+		database_errno = DATABASE_ERROR_SYS;
 		fail();
 	}
 
@@ -112,25 +145,30 @@ int open_database(struct database **database, char *filename, char *passphrase) 
 	// Read IV first.
 	unsigned char iv[IV_SIZE];
 	if(read(fd, iv, IV_SIZE) < IV_SIZE) {
+		database_errno = DATABASE_ERROR_IO;
 		fail();
 	}
 
 	// Read encrypted data.
 	if(read(fd, d->header, sizeof(*d->header)) < (signed)sizeof(sizeof(*d->header))) {
+		database_errno = DATABASE_ERROR_IO;
 		fail();
 	}
 
 	// Decrypt the data.
 	aes_context ctx;
 	if(aes_setkey_dec(&ctx, d->key, DATABASE_KEY_SIZE * 8) != 0) {
+		database_errno = DATABASE_ERROR_KEY;
 		fail();
 	}
 	if(aes_crypt_cbc(&ctx, AES_DECRYPT, sizeof(*d->header), iv, (unsigned char *)d->header, (unsigned char *)d->header) != 0) {
+		database_errno = DATABASE_ERROR_DECRYPT;
 		fail();
 	}
 
 	// Validate the database.
 	if(d->header->signature != DATABASE_SIGNATURE) {
+		database_errno = DATABASE_ERROR_PASSPHRASE;
 		fail();
 	}
 
@@ -143,14 +181,17 @@ int open_database(struct database **database, char *filename, char *passphrase) 
 
 int save_database(struct database *database) {
 	// Start writing at the beginning of the file.
-	if(lseek(database->fd, 0, SEEK_SET) != 0)
+	if(lseek(database->fd, 0, SEEK_SET) != 0) {
+		database_errno = DATABASE_ERROR_SYS;
 		return -1;
+	}
 
 	// Prepare data to be written.
 	ssize_t n = (ssize_t)sizeof(*database->header);
 	unsigned char *encrypted = (unsigned char *)calloc(n, sizeof(unsigned char));
 	if(!encrypted) {
 		errno = ENOMEM;
+		database_errno = DATABASE_ERROR_SYS;
 		return -1;
 	}
 
@@ -162,22 +203,26 @@ int save_database(struct database *database) {
 	// Encrypt.
 	aes_context ctx;
 	if(aes_setkey_enc(&ctx, database->key, DATABASE_KEY_SIZE * 8) != 0) {
+		database_errno = DATABASE_ERROR_KEY;
 		free(encrypted);
 		return -1;
 	}
 	if(aes_crypt_cbc(&ctx, AES_ENCRYPT, n, iv_updated, (unsigned char *)database->header, encrypted) != 0) {
+		database_errno = DATABASE_ERROR_ENCRYPT;
 		free(encrypted);
 		return -1;
 	}
 
 	// Write IV first.
 	if(write(database->fd, iv, IV_SIZE) < IV_SIZE) {
+		database_errno = DATABASE_ERROR_IO;
 		free(encrypted);
 		return -1;
 	}
 
 	// Write encrypted data.
 	if(write(database->fd, encrypted, n) < n) {
+		database_errno = DATABASE_ERROR_IO;
 		free(encrypted);
 		return -1;
 	}
@@ -193,4 +238,11 @@ void close_database(struct database *database) {
 	free(database->name);
 	free(database->header);
 	free(database);
+}
+
+void database_perror(char *s) {
+	if(s == NULL)
+		fprintf(stderr, "%s\n", database_strerror(database_errno));
+	else
+		fprintf(stderr, "%s: %s\n", s, database_strerror(database_errno));
 }
